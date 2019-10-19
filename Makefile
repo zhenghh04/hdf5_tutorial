@@ -14,4 +14,4 @@ parallel_hdf5:
 	mpirun -np 4 ./parallel_hdf5.x
 	h5dump ./parallel_file.h5 
 clean:
-	rm -rf *.x
+	rm -rf *.x *.h5 *.hdf5
