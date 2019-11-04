@@ -5,8 +5,10 @@
 #include "stdio.h"
 #include <sys/time.h>
 #include <string.h>
+#include "timing.h"
 using namespace std; 
 int main(int argc, char **argv) {
+  Timing tt; 
   // Assuming that the dataset is a two dimensional array of 8x5 dimension;
   int d1 = 9; 
   int d2 = 5; 
@@ -15,10 +17,10 @@ int main(int argc, char **argv) {
     if (strcmp(argv[i], "--dim")==0) {
       d1 = int(atoi(argv[i+1])); 
       d2 = int(atoi(argv[i+2])); 
-      i+=3; 
+      i+=2; 
     } else if (strcmp(argv[i], "--niter")==0) {
       niter = int(atoi(argv[i+1])); 
-      i+=2; 
+      i+=1; 
     }
   }
   hsize_t gdims[2] = {d1, d2};
@@ -45,26 +47,30 @@ int main(int argc, char **argv) {
   H5Pset_fapl_mpio(plist_id, comm, info);
   // Create file
 
-
-
+  tt.start_clock("H5Fcreate"); 
   hid_t file_id = H5Fcreate("parallel_file.h5", H5F_ACC_TRUNC, H5P_DEFAULT, plist_id);
+  tt.stop_clock("H5Fcreate"); 
   H5Pclose(plist_id);
 #ifdef DEBUG
   if (rank==0) cout << "Created file: " << endl; 
 #endif
   // create dataspace
   hid_t filespace = H5Screate_simple(2, gdims, NULL);
+  tt.start_clock("H5Dcreate"); 
   hid_t dset_id = H5Dcreate(file_id, "dset", H5T_NATIVE_INT, filespace, H5P_DEFAULT,
 			    H5P_DEFAULT, H5P_DEFAULT);
+  tt.stop_clock("H5Dcreate"); 
 #ifdef DEBUG
   if (rank==0) cout << "Created dataspace: " << endl; 
 #endif
 
   // define local data
   int* data = new int[ldims[0]*ldims[1]];
+  tt.start_clock("array"); 
   for(int i=0; i<ldims[0]*ldims[1]; i++)
     data[i] = rank + 10;
-
+  tt.stop_clock("array"); 
+  if (rank==0) printf("Memory rate: %f MB/s\n", d1*d2*sizeof(int)/tt["array"].t/1024/1024);
   // set up dataset access property list 
   plist_id = H5Pcreate(H5P_DATASET_XFER);
 
@@ -77,17 +83,23 @@ int main(int argc, char **argv) {
 #ifdef DEBUG
   if (rank==0) cout << "H5Dwrite ... " << endl; 
 #endif
-  double t0 = MPI_Wtime(); 
-  for (int i=0; i<niter; i++)
+  for (int i=0; i<niter; i++) {
+    tt.start_clock("H5Dwrite"); 
     hid_t status = H5Dwrite(dset_id, H5T_NATIVE_INT, memspace, filespace, plist_id, data);
-  double t1 = MPI_Wtime(); 
-  if (rank==0) cout <<"time: " << t1 - t0 << endl; 
+    tt.stop_clock("H5Dwrite"); 
+  }
+  Timer T = tt["H5Dwrite"]; 
+  if (rank==0) printf("Write rate: %f MB/s", d1*d2*sizeof(int)/T.t*T.num_call/1024/1024); 
   H5Pclose(plist_id);
   delete [] data;
   H5Dclose(dset_id);
   H5Sclose(filespace);
   H5Sclose(memspace);
+  tt.start_clock("H5Dclose"); 
   H5Fclose(file_id);
+  tt.stop_clock("H5Dclose"); 
+  bool master = (rank==0); 
+  tt.PrintTiming(master); 
   MPI_Finalize();
   return 0;
 }
